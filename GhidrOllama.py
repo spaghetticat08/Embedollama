@@ -5,7 +5,8 @@
 # @menupath
 # @toolbar toolbar.png
 
-import urllib2
+import requests
+from requests.exceptions import HTTPError
 import json
 import os
 import shutil
@@ -20,10 +21,17 @@ from ghidra.util.exception import CancelledException
 from ghidra.program.model.symbol import SourceType
 
 
+monitor = ConsoleTaskMonitor()
+current_program = getCurrentProgram()
+
+output_handle = open('/home/happy-pony/Projects/ghidra_scripts/output_data/GhidrOllamalog.txt', 'w')
+
 class Config:
     SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+    output_handle.write("Script directory: " + SCRIPT_DIR)
     CONFIG_FILE_PATH = os.path.join(SCRIPT_DIR, "ghidrollama_config.json")
-    
+    output_handle.write("Config file path: " + CONFIG_FILE_PATH)
+
     def __init__(self):
         self.config = Config.load()
         if self.config is None:
@@ -34,6 +42,9 @@ class Config:
             self.port = self.config["port"]
             self.model = self.config["model"]
             self.scheme = self.config["scheme"]
+            # enable running llm on instances like runpod io (requires custom link)
+            self.instance_type = self.config["instance_type"]
+            self.runpod_id = self.config["runpod_id"]
             # Whether LLM output should be saved as comments.
             # Default is False because output is unreliable and may not be useful.
             self.set_comments = self.config["set_comments"] 
@@ -85,17 +96,22 @@ class Config:
 
 
     @staticmethod
-    def select_model(scheme, host, port):
+    def select_model(instance_type, scheme, host, port, runpod_id):
         """
         Makes a request to the Ollama API to fetch a list of installed models, prompts user to select which model to use.
         Requires a valid hostname/ip to be set first.
         """
         
-        url = "{}://{}:{}/api/tags".format(scheme, host, port)
+        url = ""
+        if instance_type == "runpod":
+            url = "https://{}.11434.proxy.runpod.net/api/tags".format(runpod_id)
+        else:
+            url = "{}://{}:{}/api/tags".format(scheme, host, port)
+        
         choice = None
         try:
-            model_list_response = urllib2.urlopen(url)
-            data = json.load(model_list_response)
+            model_list_response = requests.get(url)
+            data = model_list_response.json()
 
             model_names = []
             for model in data['models']:
@@ -107,10 +123,8 @@ class Config:
 
             choice = askChoice("GhidrOllama", "Please choose the model you want to use:", model_names, "Model Selection")
 
-        except urllib2.HTTPError as e:
+        except HTTPError as e:
             print("HTTP Error {}: {}".format(e.code, e.reason))
-        except urllib2.URLError as e:
-            print("URL Error: {}".format(e.reason))
         except ValueError as e:
             print("Value Error: {}".format(e))
 
@@ -128,7 +142,7 @@ class Config:
        
         c = self.config
         try:
-            if c["host"] == None or c["port"] == None or c["model"] == None or c["scheme"] == None or c["first_run"] == None or c["set_comments"] == None or c["auto_rename"] == None:
+            if c["instance_type"] == None or c["runpod_id"] == None or c["host"] == None or c["port"] == None or c["model"] == None or c["scheme"] == None or c["first_run"] == None or c["set_comments"] == None or c["auto_rename"] == None:
                 return False
         except KeyError as e:
             print("Error: Missing key in config file: {}".format(e))
@@ -136,6 +150,10 @@ class Config:
 
         if c["host"].strip() == "":
             print("Error: empty hostname")
+            return False
+
+        if c["instance_type"] == "runpod" and c["runpod_id"] == "runpod_id":
+            print("Error: give a valid runpod_id")
             return False
 
         try:
@@ -167,33 +185,59 @@ class Config:
         """
         # Get hostname
         monitor.setMessage("Waiting for hostname")
+        
         try:
-            host = askString("GhidrOllama", "Please enter the hostname or IP of your server:", "localhost")
+            instance_type = askChoice("GhidrOllama", "Please choose whether to run Ollama through runpod instance or other:", ["runpod", "other"], "runpod")
         except CancelledException:
             return False
-        print("Selected host: " + host)
-        if host == None:
+        if instance_type == None:
             return False
+        output_handle.write("Selected config: " + instance_type)
 
-        # Get port
-        monitor.setMessage("Waiting for port")
-        try:
-            port = askInt("GhidrOllama", "Please enter the port number of your server [1-65535, usually 11434]:")
-        except CancelledException:
-            return False
-        print("Selected port: " + str(port))
-        if port == None:
-            return False
+        if instance_type == "runpod":
+            #retrieve runpod_id
+            monitor.setMessage("Waiting for runpod_id")
+            try:
+                runpod_id = askString("GhidrOllama", "Please enter the runpod ID:", "runpodId")
+            except CancelledException:
+                return False
+            if runpod_id == None:
+                return False
+            output_handle.write("Runpod_id: " + runpod_id)
+            host = "0.0.0.0"
+            port = 11434
+            scheme = "https"
 
-        # Get scheme
-        monitor.setMessage("Waiting for model select...")
-        try:
-            scheme = askChoice("GhidrOllama", "Please choose the scheme your server uses:", ["http", "https"], "http")
-        except CancelledException:
-            return False
-        print("Selected scheme: " + scheme)
-        if scheme == None:
-            return False
+        else:
+            runpod_id = "runpod_id"
+            monitor.setMessage("Waiting for hostname")
+            try:
+                host = askString("GhidrOllama", "Please enter the hostname or IP of your server:", "localhost")
+            except CancelledException:
+                return False
+            if host == None:
+                return False
+            output_handle.write("Selected host: " + host)
+
+            # Get port
+            monitor.setMessage("Waiting for port")
+            try:
+                port = askInt("GhidrOllama", "Please enter the port number of your server [1-65535, usually 11434]:")
+            except CancelledException:
+                return False
+            if port == None:
+                return False
+            output_handle.write("Selected port: " + str(port))
+
+            # Get scheme
+            monitor.setMessage("Waiting for model select...")
+            try:
+                scheme = askChoice("GhidrOllama", "Please choose the scheme your server uses:", ["http", "https"], "http")
+            except CancelledException:
+                return False
+            if scheme == None:
+                return False
+            output_handle.write("Selected scheme: " + scheme)
 
         # Get model
         monitor.setMessage("Waiting for model select...")
@@ -201,10 +245,9 @@ class Config:
             model = Config.select_model(scheme, host, port)
         except CancelledException:
             return False
-        print("Selected model: " + model)
-
         if model == None:
             return False
+        output_handle.write("Selected model: " + model)
 
         # Get project-specific prompt/context if desired.
         monitor.setMessage("Waiting for project-specific prompt...")
@@ -227,6 +270,10 @@ class Config:
 
         self.config["model"] = model
         self.model = model
+        self.config["instance_type"] = instance_type
+        self.instance_type = instance_type
+        self.config["runpod_id"] = runpod_id
+        self.runpod_id = runpod_id
         self.config["host"] = host
         self.host = host
         self.config["port"] = port
@@ -256,7 +303,7 @@ class Config:
 
         monitor.setMessage("Waiting for model select...")
         try:
-            model = Config.select_model(self.scheme, self.host, self.port)
+            model = Config.select_model(self.instance_type, self.scheme, self.host, self.port, self.runpod_id)
         except CancelledException:
             return False
 
@@ -282,7 +329,11 @@ class Config:
         if endpoint[0] == "/":
             endpoint = endpoint[1:]
 
-        url = "{}://{}:{}".format(self.scheme, self.host, self.port)
+        url = ""
+        if (self.instance_type == "runpod"):
+            url = "https://{}-11434.proxy.runpod.net".format(self.runpod_id)
+        else:
+            url = "{}://{}:{}".format(self.scheme, self.host, self.port)
         return "{}/{}".format(url, endpoint)
 
 
@@ -334,8 +385,9 @@ def interactWithOllamaAPI(model, system_prompt, prompt, c_code):
         }
     data = json.dumps(data)
 
-    req = urllib2.Request(url, data, {'Content-Type': 'application/json'})
-    response = urllib2.urlopen(req)
+    response_payload = requests.post(url, data, {'Content-Type': 'application/json'})
+    output_handle.write("Received response: ")
+    output_handle.write(response_payload)
 
     response_text = ""
     stats_summary = {}
@@ -343,22 +395,18 @@ def interactWithOllamaAPI(model, system_prompt, prompt, c_code):
 
     monitor.setMessage("Receiving response...")
 
-    while True:
-        character = response.read(1)
-        built_line += character
-        if character == '\n':
-            response_data = json.loads(built_line)
-            if "error" in response_data:
-                raise ValueError(response_data["error"])
-            if "response" in response_data:
-                response_text += response_data["response"]
-                printf('%s', response_data["response"]),
-            if response_data["done"]:
-                stats_summary = {
+    for line in response_payload.text.splitlines():
+        response_line = json.loads(line)
+        if "error" in response_line:
+            raise ValueError(response_line["error"])
+        response_text = response_text + response_line["response"]
+        if response_line["done"] == True:
+            output_handle.write("Finished reading response")
+            stats_summary = {
                     "total_duration": str(int(response_data["total_duration"]) / 1000000000) + 's'
                 }
-                break
-            built_line = ""
+            break
+            output_handle.write(response_text)
 
     monitor.setMessage("Done!")
 
@@ -374,10 +422,10 @@ def getCurrentDecompiledFunction():
     decompiler = DecompInterface()
 
     # Set the current program for the decompiler
-    decompiler.openProgram(currentProgram)
+    decompiler.openProgram(current_program)
 
     # Get the current address and the function containing it
-    currentAddress = currentLocation.getAddress()
+    currentAddress = currentLocation.__call__().getAddress()
     function = getFunctionContaining(currentAddress)
 
     if function is None:
@@ -398,7 +446,7 @@ def getDecompiledFunctionAtAddress(address):
     decompiler = DecompInterface()
 
     # Set the current program for the decompiler
-    decompiler.openProgram(currentProgram)
+    decompiler.openProgram(current_program)
 
     # Get the current address and the function containing it
     function = getFunctionContaining(address)
@@ -417,8 +465,8 @@ def getDecompiledFunctionAtAddress(address):
 
 # Returns the instruction that is currently selected in the listing window as a string
 def getSelectedInstruction():
-    listing = currentProgram.getListing()
-    instruction = listing.getInstructionAt(currentLocation.getAddress())
+    listing = current_program.getListing()
+    instruction = listing.getInstructionAt(currentLocation.__call__().getAddress())
     if instruction is not None:
             return instruction.toString()
     return None
@@ -427,9 +475,9 @@ def getSelectedInstruction():
 # Gets the selected assembly as a string
 def getSelectedAssembly():
     instructions = ""
-    listing = currentProgram.getListing()
-    if currentSelection is not None:
-        for address in currentSelection.getAddresses(True):
+    listing = current_program.getListing()
+    if currentSelection() is not None:
+        for address in currentSelection().getAddresses(True):
             instruction = listing.getInstructionAt(address)
             if instruction:
                 instructions += '0x' + address.toString() + ': ' + instruction.toString() + '\n'
@@ -484,7 +532,7 @@ def askQuestionAboutFunction(model, question, c_code):
 
 # Function to explain the selected instruction using the Ollama API
 def explainInstruction(model, instruction):
-    architecture_name = currentProgram.getLanguage().getProcessor().toString()
+    architecture_name = current_program.getLanguage().getProcessor().toString()
     prompt = "Please explain the following instruction. The architecture is " + architecture_name + "."
     system_prompt = "You are an expert reverse engineer assistant called GhidrOllama, your only purpose is to reverse engineer code, and you are a master in the field. The user will send you an assembly instruction, as well as the architecture that the instruction runs on, as you know lots of low-level architectures, please can you explain the provided instruction, explain its purpose, and provide examples."
     return interactWithOllamaAPI(model, system_prompt, prompt, instruction)
@@ -492,7 +540,7 @@ def explainInstruction(model, instruction):
 
 # Function to explain selected assembly using the Ollama API
 def explainAssembly(model, assembly):
-    architecture_name = currentProgram.getLanguage().getProcessor().toString()
+    architecture_name = current_program.getLanguage().getProcessor().toString()
     prompt = "Please explain the following assembly instructions. The architecture is " + architecture_name + "."
     system_prompt = "You are an expert reverse engineer assistant called GhidrOllama, your only purpose is to reverse engineer code, and you are a master in the field. The user will send you some assembly instructions, as well as the architecture that the instructions run on, as you know lots of low-level architectures, please can you explain what the provided instructions do."
     return interactWithOllamaAPI(model, "", prompt, assembly)
@@ -503,6 +551,7 @@ def addCommentToCurrentFunction(comment):
     if not CONFIG.set_comments:
         return
 
+    currentAddress = currentLocation.__call__().getAddress()
     currentFunction = getFunctionContaining(currentAddress)
     currentFunction.setComment(comment)
 
@@ -521,6 +570,7 @@ def addCommentToCurrentInstruction(comment_text):
     # Get the current program
     program = getCurrentProgram()
     
+    currentAddress = currentLocation.__call__().getAddress()
     # Get the instruction at the current address
     instruction = program.getListing().getInstructionAt(currentAddress)
     
@@ -590,6 +640,12 @@ def main():
                     c_code = getCurrentDecompiledFunction()
                     explanation, stats_summary = explainFunction(model, c_code)
                     addCommentToCurrentFunction(explanation)
+                    print(explanation)
+                    output_handle.write("Explanation of function: ")
+                    output_handle.write(explanation)
+                    output_handle.write("Performance statistics: ")
+                    output_handle.write(stats_summary)
+                    output_handle.write("----------------------\n\n\n")
                 elif option == 2:
                     c_code = getCurrentDecompiledFunction()
                     explanation, stats_summary = suggestFunctionName(model, c_code)
@@ -600,23 +656,50 @@ def main():
                     # make sure new name isn't empty
                     if new_name != "":
                         renameFunction(currentAddress, new_name)
+                        print("Suggested name: " + new_name)
+                        output_handle.write("Suggested name: " + new_name)
+                        output_handle.write("Performance statistics: ")
+                        output_handle.write(stats_summary)
+                        output_handle.write("----------------------\n\n\n")
                 elif option == 3:
                     c_code = getCurrentDecompiledFunction()
                     explanation, stats_summary = addFunctionComments(model, c_code)
+                    print(explanation)
+                    output_handle.write("Suggested function comments: ")
+                    output_handle.write(explanation)
+                    output_handle.write("Performance statistics: ")
+                    output_handle.write(stats_summary)
+                    output_handle.write("----------------------\n\n\n")
                 elif option == 4:
                     c_code = getCurrentDecompiledFunction()
                     explanation, stats_summary = tidyUpFunction(model, c_code)
+                    print(explanation)
+                    output_handle.write("Suggested tidied up function: ")
+                    output_handle.write(explanation)
+                    output_handle.write("Performance statistics: ")
+                    output_handle.write(stats_summary)
+                    output_handle.write("----------------------\n\n\n")
                 elif option == 5:
                     c_code = getCurrentDecompiledFunction()
                     question = askString("GhidrOllama", "What do you want to ask about the function?")
                     explanation, stats_summary = askQuestionAboutFunction(model, question, c_code)
+                    print(explanation)
+                    output_handle.write("Answer to question: " + explanation)
+                    output_handle.write("Performance statistics: ")
+                    output_handle.write(stats_summary)
+                    output_handle.write("----------------------\n\n\n")
                 elif option == 6:
                     c_code = getCurrentDecompiledFunction()
                     explanation, stats_summary = identifySecurityVulnerabilities(model, c_code)
+                    print(explanation)
+                    output_handle.write("Identified security vulnerabilities: " + explanation)
+                    output_handle.write("Performance statistics: ")
+                    output_handle.write(stats_summary)
+                    output_handle.write("----------------------\n\n\n")
                 elif option == 7:
                     try:
                         # Create a ScriptTask and run the script
-                        print 'Searching for potential POSIX leaf functions...'
+                        print("Searching for potential POSIX leaf functions...")
                         leaf_finder = leafblower.LeafFunctionFinder(currentProgram)
                         leaf_finder.find_leaves()
                         leaf_finder.display()
@@ -643,17 +726,33 @@ def main():
                     if c_code is not None:
                         explanation, stats_summary = explainInstruction(model, c_code)
                         addCommentToCurrentInstruction(explanation)
+                        print(explanation)
+                        output_handle.write("explanation selected instruction " + explanation)
+                        output_handle.write("Performance statistics: ")
+                        output_handle.write(stats_summary)
+                        output_handle.write("----------------------\n\n\n")
                     else:
                         print("No instruction selected!")
                 elif option == 9:
                     c_code = getSelectedAssembly()
                     if c_code is not None:
                         explanation, stats_summary = explainAssembly(model, c_code)
+                        print(explanation)
+                        output_handle.write("Explanation selected assembly: " + explanation)
+                        output_handle.write("Performance statistics: ")
+                        output_handle.write(stats_summary)
+                        output_handle.write("----------------------\n\n\n")
                     else:
                         print("No assembly selected!")
                 elif option == 10:
                     prompt = askString("GhidrOllama", "Enter your prompt:")
                     explanation, stats_summary = interactWithOllamaAPI(model, "You are an expert reverse engineer assistant called GhidrOllama", prompt, '')
+                    print(explanation)
+                    output_handle.write("Prompt to GhidrOllama: " + prompt)
+                    output_handle.write("Answer of GhidrOllama: " + explanation)
+                    output_handle.write("Performance statistics: ")
+                    output_handle.write(stats_summary)
+                    output_handle.write("----------------------\n\n\n")
                 elif option == 11:
                     print("reconfiguring")
                     if not CONFIG.reconfigure():
@@ -676,6 +775,6 @@ def main():
         print("Invalid option.")
     except KeyboardInterrupt:
         print("\nTerminating the script.")
-    print ''
+    print("")
 
 main()
