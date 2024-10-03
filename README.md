@@ -23,6 +23,9 @@ This script interacts with Ollama's API to interact with Large Language Models (
 ## Prerequisites
 
 - [Ghidra](https://github.com/NationalSecurityAgency/ghidra)
+- [Ghidrathon]
+    This script is adapted to work with Python3 via Ghidrathon. Python2 will not work.
+- [Python3] Plus libraries: requests, json
 - [Ollama](https://github.com/jmorganca/ollama)
 - [Any of the Ollama models](https://ollama.ai/library)
 
