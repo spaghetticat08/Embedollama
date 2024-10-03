@@ -136,22 +136,22 @@ class FinderBase(object):
 
         # First block prints the title and '=' characters to make a title
         # border
-        print separator
-        print spacer,
+        print(separator)
+        print(spacer)
         for width, column in zip(max_line_len, title):
-            print format_specifier.format(column, width=width),
-            print spacer,
-        print ''
-        print separator
+            print(format_specifier.format(column, width=width))
+            print(spacer)
+        print('\n')
+        print(separator)
 
         # Print the actual entries.
         for entry in entries:
-            print spacer,
+            print(spacer)
             for width, column in zip(max_line_len, entry):
-                print format_specifier.format(column, width=width),
-                print spacer,
-            print ''
-        print separator
+                print(format_specifier.format(column, width=width))
+                print(spacer)
+            print('\n')
+        print(separator)
 
 
 class LeafFunctionFinder(FinderBase):

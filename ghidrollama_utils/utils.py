@@ -111,8 +111,7 @@ def allowed_processors(current_program, processor_list):
     curr_processor = get_processor(current_program)
 
     if curr_processor not in processor_list:
-        print '%s is not a valid processor for this script. Supported ' \
-            'processors are: %s' % (curr_processor, processor_list)
+        print('%s is not a valid processor for this script. Supported processors are: %s' % (curr_processor, processor_list))
         exit(1)
 
 
@@ -147,19 +146,19 @@ def table_pretty_print(title, entries):
 
     # First block prints the title and '=' characters to make a title
     # border
-    print separator
-    print spacer,
+    print(separator)
+    print(spacer)
     for width, column in zip(max_line_len, title):
-        print format_specifier.format(column, width=width),
-        print spacer,
-    print ''
-    print separator
+        print(format_specifier.format(column, width=width))
+        print(spacer)
+    print('\n')
+    print(separator)
 
     # Print the actual entries.
     for entry in entries:
-        print spacer,
+        print(spacer)
         for width, column in zip(max_line_len, entry):
-            print format_specifier.format(column, width=width),
-            print spacer,
-        print ''
-    print separator
+            print(format_specifier.format(column, width=width))
+            print(spacer)
+        print('\n')
+    print(separator)
